@@ -24,6 +24,7 @@ References:
 var fs = require('fs');
 var program = require('commander');
 var cheerio = require('cheerio');
+var rest = require('restler');
 var HTMLFILE_DEFAULT = "index.html";
 var CHECKSFILE_DEFAULT = "checks.json";
 
@@ -46,13 +47,35 @@ var loadChecks = function(checksfile) {
 
 var checkHtmlFile = function(htmlfile, checksfile) {
     $ = cheerioHtmlFile(htmlfile);
+    return checkCheerioHtmlFile($, checksfile);
+};
+
+var checkCheerioHtmlFile = function(cheeriofile, checksfile) {
     var checks = loadChecks(checksfile).sort();
     var out = {};
     for(var ii in checks) {
-        var present = $(checks[ii]).length > 0;
+        var present = cheeriofile(checks[ii]).length > 0;
         out[checks[ii]] = present;
     }
     return out;
+};
+
+var checkUrl = function(url, checksfile, callback) {
+    rest.get(url).on('complete', function(result) {
+      if (result instanceof Error) {
+        console.log("%s cannot be downloaded. Exiting.", result.message);
+        process.exit(1); // http://nodejs.org/api/process.html#process_process_exit_code
+      } else {
+        callback(null, result, checksfile);
+      }
+    });
+};
+
+var checkHtmlFromUrl = function(err, htmlfromurl, checksfile) {
+    $ = cheerio.load(htmlfromurl);
+
+    var checkJson = checkCheerioHtmlFile($, checksfile);
+    displayCheckResult(checkJson);
 };
 
 var clone = function(fn) {
@@ -61,14 +84,25 @@ var clone = function(fn) {
     return fn.bind({});
 };
 
+var displayCheckResult = function(checkJson) {
+    var outJson = JSON.stringify(checkJson, null, 4);
+    console.log(outJson);
+};
+
 if(require.main == module) {
     program
         .option('-c, --checks <check_file>', 'Path to checks.json', clone(assertFileExists), CHECKSFILE_DEFAULT)
         .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists), HTMLFILE_DEFAULT)
+        .option('-u, --url <url>', 'URL to index.html')
         .parse(process.argv);
-    var checkJson = checkHtmlFile(program.file, program.checks);
-    var outJson = JSON.stringify(checkJson, null, 4);
-    console.log(outJson);
+
+    if (program.url) {
+        checkUrl(program.url, program.checks, checkHtmlFromUrl);
+    }
+    else {
+        var checkJson = checkHtmlFile(program.file, program.checks);
+        displayCheckResult(checkJson);
+    }
 } else {
     exports.checkHtmlFile = checkHtmlFile;
 }
